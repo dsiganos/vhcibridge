@@ -67,7 +67,7 @@ static int host_recv_pkt(uint8_t *data, uint16_t len)
 
 static int host_send_pkt(uint8_t *data, uint16_t len)
 {
-    pkt_dump("host TX: ", data, len);
+    //pkt_dump("host TX: ", data, len);
     esp_vhci_host_send_packet(data, len);
     return 0;
 }

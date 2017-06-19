@@ -198,6 +198,14 @@ unsigned read_pkt_from_uart(uint8_t *pktbuf)
     }
 }
 
+void wait_until_ready()
+{
+    while (!esp_vhci_host_check_send_available()) {
+        printf("HCI controller not ready\n");
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+    }
+}
+
 uint8_t g_pktbuf[2000];
 
 void vhcibridge(void *pvParameters)
@@ -210,10 +218,7 @@ void vhcibridge(void *pvParameters)
     uart_init();
     
     while (1) {
-        while (!esp_vhci_host_check_send_available()) {
-            printf("HCI controller not ready\n");
-            vTaskDelay(10 / portTICK_PERIOD_MS);
-        }
+        wait_until_ready();
 
         len = read_pkt_from_uart(g_pktbuf);
 

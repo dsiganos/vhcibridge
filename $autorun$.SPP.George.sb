@@ -1,0 +1,167 @@
+#define TEN_SECOND 10000 // There are 10000 ms in 10 secs
+
+dim buffer_full
+dim SPP_data$
+dim rc,hC
+dim s$[8]
+dim number_of_bytes
+SPP_data$ = "a"
+buffer_full = 0
+dim hSppPort
+dim hConn
+
+function Write_data_on_spp(SPP_data$)
+// Tries to write data to an spp pipe. In case of success, it decrements the number_of_bytes
+// left to be written to the pipe.
+
+    dim SPP_data_Len, wLen
+
+    SPP_data_Len = strlen(SPP_data$)
+    rc = BtcSppWrite(hC, SPP_data$, wLen)
+    if wLen != SPP_data_Len then
+        buffer_full = 1
+        strshiftleft(SPP_data$,wLen) // Discard the data already written
+    else
+        buffer_full = 0
+        number_of_bytes = number_of_bytes - 1
+        timerstart(1,TEN_SECOND,0)
+    endif
+endfunc 1
+
+function is_valid_request(data$)
+// Some basic checks to verify that the receiver obays the protocol
+// We check that the total length of th number received is 10 bytes
+// and that it starts with a "0x"
+
+    dim hex$: hex$ = "0x"
+    if strlen(data$) != 10 then
+        exitfunc 0
+    endif
+    if strpos(data$,hex$,0) != 0 then
+        exitfunc 0
+    endif
+endfunc 1
+
+function send_response()
+// This is the function that writes the data to the pipe.
+// In case the last write was not successfull (the buffer is full) then
+// we break out to the main waitevent so we can proccess other tasks
+// (Non blocking write)
+
+    while number_of_bytes > 0
+        rc = Write_data_on_spp(SPP_data$)
+        if buffer_full == 1 then
+            break
+        endif
+    endwhile
+endfunc 1
+
+sub Initialise()
+
+
+    //Configure discoverability mode
+    rc = BtcDiscoveryConfig(0,0)
+
+    rc = BtcSetPairable(1)
+
+    //Set connectable so other devices can connect to this device
+    rc = BtcSetConnectable(1)
+
+    //Open SPP port and listen for SPP connections, enable discoverability
+    rc = BtcSppOpen(hSppPort)
+    print "Ready\n"
+endsub
+
+//------------------------------------------------------------------------------
+//This handler is Called when data is received via SPP - BRIDGE mode
+//------------------------------------------------------------------------------
+function HandlerSppData()
+// If we get a valid request for download, we respond to it...
+
+    dim hPort,data$,rLen
+    rc = BtcSppRead(hPort, data$, rLen)
+
+    if is_valid_request(data$) then
+        rc = ExtractIntToken(data$,number_of_bytes)
+        print "requested size is "; number_of_bytes; " bytes\n"
+        rc= send_response()
+    endif
+endfunc 1
+
+
+//------------------------------------------------------------------------------
+//This handler is  Called when an SPP disconnection occurs
+//------------------------------------------------------------------------------
+function HandlerSppDiscon(hConn)
+    print "\n --- Spp Disconnect\n"
+    //Set connectable
+    rc = BtcSetConnectable(1)
+    rc = BtcSppOpen(hSppPort)
+    print "Ready\n"
+endfunc 1
+
+//------------------------------------------------------------------------------
+//This handler is  Called after an SPP connection attempt
+//------------------------------------------------------------------------------
+function HandlerSppConn(hConn, res) as integer
+
+    //If connected successfully
+    if res == 0 then
+        timerstart(1,TEN_SECOND,0)
+        print "\n --- SPP Connect: ("; hConn;")\n"
+        hC = hConn
+        //Set not connectable to prevent multiple connections
+        rc = BtcSetConnectable(0)
+
+//        dim rlen, data$: data$ = "Welcome to Gkekis SPP service"
+//        rc=BtcSppWrite(hC, data$, rlen)
+    endif
+endfunc 1
+
+
+//------------------------------------------------------------------------------
+// Called when there is a pairing request from another device
+//------------------------------------------------------------------------------
+function HandlerPairReq()
+    rc = BtcGetPAIRRequestBDAddr(s$[3])       //Setting it to s$[3] so it doesn't get mixed up with any other strings (command params etc) that may be stored in s$[1]
+    rc = BtcBondingEraseKey(s$[3])            //Erase link key for this bluetooth device incase already bonded with it
+    print "\nPair Req: "; StrHexize$(s$[3])
+            rc = BtcSendPairResp(1)
+            print "\n\nPairing...\n"
+
+    UartFlush(1)                              //Flush the uart rx buffer
+
+endfunc 1
+
+
+//------------------------------------------------------------------------------
+// Called when txbuffer is empty
+//------------------------------------------------------------------------------
+function HandlerSppTxEmpty(i)
+// When the buffer is empty, set the global variable and then continue sending
+// the data through the pipe.
+
+    buffer_full = 0
+    rc = send_response()
+endfunc 1
+
+function timer1()
+    rc = BtcSppClose(hSppPort)
+    if rc == 0 then
+        print "\n\nDisconnecting..."
+    else
+        print "\nError:", integer.h'rc
+    endif
+    rc = HandlerSppDiscon(hConn)
+endfunc 1
+
+
+OnEvent  EVBTC_PAIR_REQUEST     call HandlerPairReq
+OnEvent  EVSPPCONN              call HandlerSppConn
+OnEvent  EVSPPDISCON            call HandlerSppDiscon
+OnEvent  EVBTC_SPP_DATA_RECEIVED call HandlerSppData
+OnEvent  EVSPPTXEMPTY           call HandlerSppTxEmpty
+OnEvent  EVTMR1                 call timer1
+
+Initialise()
+WaitEvent

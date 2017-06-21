@@ -1,231 +1,75 @@
-//******************************************************************************
-
-        //Default BT Friendly Name - name of device seen by other devices
-#define FRIENDLY_NAME                    "Laird BT900"
-
-        //If set to 1, on startup an SPP port will be opened for peer devices to connect to
-#define OPEN_SPP_ON_STARTUP              1
-
 #define PAIRABLE_ON_STARTUP              1
 
-#define DISCOVERABLE_ON_STARTUP          1    //if OPEN_SPP_ON_STARTUP==1, discoverablilty will be enabled for DISCOV_TIMEOUT specified
-
-        //0 - General, 1 - Limited
-#define DISCOV_MODE                      0
-
-        //Time that module will be discoverable for in seconds if discoverabilty enabled
-#define DISCOV_TIMEOUT                   120
-
-//Inquiry config parameters (See description for BtcInquiryConfig() in BT900 Extention user manual)
-#define INQR_TMT                         10   //Inquiry timeout in seconds
-#define INQR_TYPE                        0    //Inquiry type - general inquiry
-#define INQR_MODE                        2    //Inquiry mode - extended inquiry
-#define MAX_DEVS_REC_RESP                100  //Max number of devices to receive inquiry responses from
-
-        //For subsequent incoming pair requests, if set to 1, pairing information will be saved in bonding manager
-#define SAVE_PAIRINGS                    1
-
-#define APP_VERSION                      "1.2"
-        //Size of i[]
-#define NUM_OF_I_PARAMS                  (5)
-        //Size of s$[]
-#define NUM_OF_S_PARAMS                  (5)
-
-//APP RUN MODES
-#define BRIDGE_SPP_MODE                  1
-
-
-#define AUTH_FAILURE                     0x05
-
-#define UART_BAUDRATE                    (115200)
-#define MAX_FRAME_SIZE                   192
-#define RX_CREDITS                       3
-
-
-//******************************************************************************
-// Global Variable Declarations
-//******************************************************************************
 dim rc
-
-dim ok$: ok$    = "\nOK\n"
-
-dim i[NUM_OF_I_PARAMS]      //Index 0 used for return values
-dim s$[NUM_OF_S_PARAMS]     //Must be at least 8 elements
-
 dim hC                      //SPP connection handle
-dim hSppPort                //Handle of spp port that a peer will connect to
 
-dim buffer: buffer = 0
-dim u$: u$ = ""
-dim RecBuf$: RecBuf$ = ""                 //UART buffer
-
-Sub AssertRC(rc,ln)
-    if rc!=0 then
-        print "\nFail :";integer.h' rc;" at tag ";ln
-    //else
-        //print "\nOk: line ";ln
-    endif
-EndSub
 
 //------------------------------------------------------------------------------
 //------------------------------------------------------------------------------
 sub Initialise()
-    //Setup nAutorun pin to control switching between command and bridge mode
-    rc=GpioBindEvent(0,22,2)
-
-    rc = UartOpen(UART_BAUDRATE, 0, 0, "CN81H")
-    AssertRC(rc,738)
-
-    //Set friendly name
-    s$[1] = FRIENDLY_NAME
-    rc = BtcSetFriendlyName(s$[1])
-    AssertRC(rc,739)
-
-    //Configure inquiries from #defined configuration values
-    rc = BtcInquiryConfig(0,INQR_TYPE)
-    AssertRC(rc,741)
-    rc = BtcInquiryConfig(1,INQR_MODE)
-    AssertRC(rc,743)
-    rc = BtcInquiryConfig(2,MAX_DEVS_REC_RESP)
-    AssertRC(rc,749)
-
-    //Configure discoverability mode
-    rc = BtcDiscoveryConfig(0,DISCOV_MODE)
-    AssertRC(rc,679)
-
-    //Save subsequent pairings -bond
-    rc = BtcSavePairings(SAVE_PAIRINGS)
-    AssertRC(rc,615)
-
+    dim hSppPort                //Handle of spp port that a peer will connect to
     rc = BtcSetPairable(PAIRABLE_ON_STARTUP)
 
     //Set connectable so other devices can connect to this device
     rc = BtcSetConnectable(1)
-    AssertRC(rc,682)
 
-    rc = BtcSPPSetParams(MAX_FRAME_SIZE, RX_CREDITS)
-    AssertRC(rc,685)
-
-    if OPEN_SPP_ON_STARTUP == 1 then
         //Open SPP port and listen for SPP connections, enable discoverability
         rc = BtcSppOpen(hSppPort)
-        AssertRC(rc,651)
-    endif
-
-    //Set discoverable if DISCOVERABLE_ON_STARTUP ==1 OR OPEN_SPP_ON_STARTUP==1
-    rc = BtcSetDiscoverable(DISCOVERABLE_ON_STARTUP || OPEN_SPP_ON_STARTUP, DISCOV_TIMEOUT)
-
-    //Set and print friendly name
-    s$[1] = FRIENDLY_NAME
-    rc = BtcSetFriendlyName(s$[1])
-    print "\n\r";s$[1];"\n\r"
+    print "Ready\n"
 endsub
 
-//------------------------------------------------------------------------------
-// Called when txbuffer is empty
-//------------------------------------------------------------------------------
-function HandlerSppTxEmpty(i)
-    dim uLen, wLen
-    print "HandlerSppTxEmpty\n"
-    if buffer == 1 then
-        uLen = strlen(u$)
-        rc = BtcSppWrite(hC, u$, wLen)
-        if wLen != uLen then
-            buffer = 1
-            strshiftleft(u$,wLen)
-        else
-            buffer=0
-            u$ = ""
-        uLen  = UartRead(u$)
-
-        if uLen > 0 then
-                rc = BtcSppWrite(hC, u$, wLen)
-                if wLen != uLen then
-                    buffer = 1
-                    strshiftleft(u$,wLen)
-                else
-                    u$=""
-                endif
-            endif
-        endif
-    endif
-endfunc 1
+//******************************************************************************
+// Handler definitions
+//******************************************************************************
 
 //------------------------------------------------------------------------------
-// Called when data is received via SPP - BRIDGE mode
+//This handler is Called when data is received via SPP - BRIDGE mode
 //------------------------------------------------------------------------------
 function HandlerSppData()
     dim hPort, data$, rLen
-    print "HandlerSppData\n"
     rc = BtcSppRead(hPort, data$, rLen)
 
     rc=BtcSppWrite(hC, data$, rlen)
-    print "RX:"; data$; "rlen="; rlen; "\n"
+    print "RX: "; data$; " rlen="; rlen; "\n"
 endfunc 1
 
 //------------------------------------------------------------------------------
-// Called when an SPP disconnection occurs
+//This handler is  Called when an SPP disconnection occurs
 //------------------------------------------------------------------------------
 function HandlerSppDiscon(hConn)
     print "\n --- Spp Disconnect"
     //Set connectable
     rc = BtcSetConnectable(1)
-
-    //Set discoverable if spp port open
-    if hSppPort!=0 then
-        rc = BtcSetDiscoverable(1, DISCOV_TIMEOUT)
-    endif
 endfunc 1
 
 //------------------------------------------------------------------------------
-// Called after an SPP connection attempt
+//This handler is  Called after an SPP connection attempt
 //------------------------------------------------------------------------------
 function HandlerSppConn(hConn, res) as integer
-    print "\n --- SPP Connect: (";integer.h' res;")"
+    print "\n --- SPP Connect: (";integer.h' res;")\n"
     //If connected successfully
     if res == 0 then
         hC = hConn
-        rc = SendMsgApp(0,BRIDGE_SPP_MODE)
-
-        //Set not discoverable or connectable to prevent multiple connections
-        rc = BtcSetDiscoverable(0,DISCOV_TIMEOUT)
+        //Set not connectable to prevent multiple connections
         rc = BtcSetConnectable(0)
-        AssertRC(rc,804)
-    endif
 
-    //Set pairable and attempt to pair if an authentication failure was the reason connect attempt failed
-    if res == AUTH_FAILURE then
-        rc = BtcSetPairable(1)
-        AssertRC(rc,863)
-
-        rc = BtcPair(s$[1],2) //Attempt to pair, using default setting for bonding
-        AssertRC(rc,866)
+//        dim rlen, data$: data$ = "Welcome to Gkekis SPP service"
+//        rc=BtcSppWrite(hC, data$, rlen)
     endif
 endfunc 1
 
-//------------------------------------------------------------------------------
-// Called when there is a pairing request from another device
-//------------------------------------------------------------------------------
-function HandlerPairReq()
-    rc = BtcGetPAIRRequestBDAddr(s$[3])       //Setting it to s$[3] so it doesn't get mixed up with any other strings (command params etc) that may be stored in s$[1]
-    rc = BtcBondingEraseKey(s$[3])            //Erase link key for this bluetooth device incase already bonded with it
-    print "\nPair Req: "; StrHexize$(s$[3])
-            rc = BtcSendPairResp(1)
-            print "\n\nPairing..."
-endfunc 1
 
 //******************************************************************************
 //******************************************************************************
 // Equivalent to main() in C
 //******************************************************************************
 
+
 //------------------------------------------------------------------------------
 // Enable synchronous event handlers
 //------------------------------------------------------------------------------
 OnEvent  EVSPPCONN              call HandlerSppConn
 OnEvent  EVSPPDISCON            call HandlerSppDiscon
-OnEvent  EVBTC_PAIR_REQUEST     call HandlerPairReq
-OnEvent  EVSPPTXEMPTY           call HandlerSppTxEmpty
 OnEvent  EVBTC_SPP_DATA_RECEIVED call HandlerSppData
 
 //------------------------------------------------------------------------------

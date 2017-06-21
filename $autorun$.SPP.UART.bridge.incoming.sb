@@ -152,29 +152,6 @@ function HandlerSppTxEmpty(i)
 endfunc 1
 
 //------------------------------------------------------------------------------
-// This handler is called when there at least one inquiry response waiting to be read
-//------------------------------------------------------------------------------
-function HandlerInqResp(respType) as integer
-    dim ad$,dta$,rsi,nme$,ndx
-    print "HandlerInqResp\n"
-    while BtcInquiryGetReport(ad$,dta$,ndx,rsi)==0
-        //Get and print name of device
-        rc = BtcGetEIRByTag(dta$,0x09,nme$)
-        print "\nINQ: "; StrHexize$(ad$), rsi, nme$
-    endwhile
-endfunc 1
-
-
-////------------------------------------------------------------------------------
-//// This handler is called when there is an inquiry timeout
-////------------------------------------------------------------------------------
-//function HandlerInqTO() as integer
-//    print "HandlerInqto\n"
-//    //Service any waiting inquiry responses
-//    rc = HandlerInqResp(2)
-//endfunc 1
-
-//------------------------------------------------------------------------------
 // Called when data is received via SPP - BRIDGE mode
 //------------------------------------------------------------------------------
 function HandlerSppData()
@@ -226,22 +203,6 @@ function HandlerSppConn(hConn, res) as integer
     endif
 endfunc 1
 
-
-////------------------------------------------------------------------------------
-//// Called when a connection attempt to an SPP device times out
-////------------------------------------------------------------------------------
-//function HandlerSppConnTimOut() as integer
-//    print  "\n --- SPP Conn Attempt Timeout\n"
-//endfunc 1
-
-
-////------------------------------------------------------------------------------
-//// This handler is called when there is an discoverability timeout
-////------------------------------------------------------------------------------
-//function HandlerBtcDiscTimOut() as integer
-//    print "\n --- No longer discoverable\n"
-//endfunc 1
-
 //------------------------------------------------------------------------------
 // Called when there is a pairing request from another device
 //------------------------------------------------------------------------------
@@ -253,42 +214,6 @@ function HandlerPairReq()
             print "\n\nPairing..."
 endfunc 1
 
-////------------------------------------------------------------------------------
-//// Called after a pairing attempt
-////------------------------------------------------------------------------------
-//function HandlerPairRes(res)
-//    print "\n --- Pair: (";integer.h'res; ") "; StrHexize$(s$[3]);ok$
-//endfunc 1
-
-////------------------------------------------------------------------------------
-//// Called when the UART transmit bufffer is empty
-////------------------------------------------------------------------------------
-//function HandlerUartTxEmpty()
-//    dim hPort, data$, rLen, UartSent
-//    while strlen(RecBuf$) > 0
-//        UartSent = UARTWRITE(RecBuf$)
-//        STRSHIFTLEFT(RecBuf$, UartSent)
-//        if (UartSent != strlen(RecBuf$)) then
-//            //Can't send any more
-//            exitfunc 1
-//        endif
-//    endwhile
-
-//    while BtcSppRead(hPort, data$, rLen) == 0
-//        while rLen>0
-//            UartSent = UARTWRITE(data$)
-//            STRSHIFTLEFT(data$, UartSent)
-//            if UartSent != rLen then
-//                //Uart full - add to buffer instead
-//                RecBuf$ = data$
-//                exitfunc 1
-//            endif
-
-//            rLen = strlen(data$)
-//        endwhile
-//    endwhile
-//endfunc 1
-
 //******************************************************************************
 //******************************************************************************
 // Equivalent to main() in C
@@ -297,15 +222,9 @@ endfunc 1
 //------------------------------------------------------------------------------
 // Enable synchronous event handlers
 //------------------------------------------------------------------------------
-OnEvent  EVINQRESP              call HandlerInqResp
-//OnEvent  EVBTC_INQUIRY_TIMEOUT  call HandlerInqTO
 OnEvent  EVSPPCONN              call HandlerSppConn
 OnEvent  EVSPPDISCON            call HandlerSppDiscon
-//OnEvent  EVBTC_PAIR_RESULT      call HandlerPairRes
 OnEvent  EVBTC_PAIR_REQUEST     call HandlerPairReq
-//OnEvent  EVBTC_SPP_CONN_TIMEOUT call HandlerSppConnTimOut
-//OnEvent  EVBTC_DISCOV_TIMEOUT   call HandlerBtcDiscTimOut
-//OnEvent  EVUARTTXEMPTY          call HandlerUartTxEmpty
 OnEvent  EVSPPTXEMPTY           call HandlerSppTxEmpty
 OnEvent  EVBTC_SPP_DATA_RECEIVED call HandlerSppData
 

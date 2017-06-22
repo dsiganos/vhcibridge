@@ -6,3 +6,7 @@
 PROJECT_NAME := vhcibridge
 
 include $(IDF_PATH)/make/project.mk
+
+ctags:
+	ctags -R ../esp-idf
+	ctags -a -R

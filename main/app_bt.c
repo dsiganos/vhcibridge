@@ -14,13 +14,22 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <assert.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/uart.h"
 #include "bt.h"
 #include "esp_log.h"
+#include "wifi.h"
+#include "lwip/tcpip.h"
 
 #define uart_num (UART_NUM_2)
+
+uint8_t *STARTFRAMEBT = (uint8_t *) "\r\nSTARTFRAMEBT,";
+uint8_t *STARTFRAMEWF = (uint8_t *) "\r\nSTARTFRAMEWF,";
+unsigned STARTFRAMELEN = 15;
+
+static SemaphoreHandle_t mutex;
 
 /*
  * @brief: BT controller callback function, used to notify the upper layer that
@@ -31,7 +40,7 @@ static void controller_rcv_pkt_ready(void)
     //printf("controller rcv pkt ready\n");
 }
 
-static int pkt_dump(const char *msg, const uint8_t *data, uint16_t len)
+int pkt_dump(const char *msg, const uint8_t *data, uint16_t len)
 {
     printf("%s", msg);
     for (uint16_t i = 0; i < len; i++) {
@@ -41,17 +50,16 @@ static int pkt_dump(const char *msg, const uint8_t *data, uint16_t len)
     return 0;
 }
 
-/*
- * @brief: BT controller callback function, to transfer data packet to upper
- *         controller is ready to receive command
- */
-static int host_recv_pkt(uint8_t *data, uint16_t len)
+void write_frame_to_uart(int is_bt, uint8_t *data, uint16_t len)
 {
+    char *startframe = is_bt ? ((char *) STARTFRAMEBT) : ((char *) STARTFRAMEWF);
     char numbuf[6];
     int i;
 
+    xSemaphoreTake(mutex, 10000);
+
     //pkt_dump("host RX: ", data, len);
-    uart_write_bytes(uart_num, "\r\nSTARTFRAME,", 13);
+    uart_write_bytes(uart_num, startframe, STARTFRAMELEN);
 
     sprintf(numbuf, "%04X,", len);
     uart_write_bytes(uart_num, numbuf, 5);
@@ -62,10 +70,56 @@ static int host_recv_pkt(uint8_t *data, uint16_t len)
         uart_write_bytes(uart_num, minibuf, 2);
     }
 
+    xSemaphoreGive(mutex);
+}
+
+/*
+ * @brief: BT controller callback function, to transfer data packet to upper
+ *         controller is ready to receive command
+ */
+static int vhci_recv_pkt_cb(uint8_t *data, uint16_t len)
+{
+    write_frame_to_uart(1, data, len);
     return 0;
 }
 
-static int host_send_pkt(uint8_t *data, uint16_t len)
+int esp_wifi_internal_tx(int wifi_if, void *buffer, u16_t len);
+static void wifi_inject_packet_cb(void *ctx)
+{
+    struct pbuf *p = (struct pbuf *) ctx;
+    pkt_dump("wifi inject cb: ", p->payload, p->len);
+
+    switch(esp_wifi_internal_tx(0, p->payload, p->len))
+    {
+        case ERR_OK:
+            printf("Packet in the air!\n");
+            break;
+        case ERR_IF:
+            printf("WiFi driver error\n");
+            break;
+        default:
+            printf("Some other error I don't want to control now\n");
+            break;
+    }
+    free(p);
+}
+
+static void wifi_inject_packet(uint8_t *data, uint16_t len)
+{
+    err_t rc;
+    struct pbuf *p = malloc(sizeof(struct pbuf));
+    if (p == NULL) return;
+
+    printf("sizeof(struct pbuf) = %d\n", sizeof(struct pbuf));
+    pkt_dump("wifi inject TX: ", data, len);
+
+    p->payload = data;
+    p->len = len;
+    rc = tcpip_callback_with_block(wifi_inject_packet_cb, p, 1);
+    if (rc) free(p);
+}
+
+static int vhci_send_pkt(uint8_t *data, uint16_t len)
 {
     //pkt_dump("host TX: ", data, len);
     esp_vhci_host_send_packet(data, len);
@@ -74,7 +128,7 @@ static int host_send_pkt(uint8_t *data, uint16_t len)
 
 static esp_vhci_host_callback_t vhci_host_cb = {
     controller_rcv_pkt_ready,
-    host_recv_pkt
+    vhci_recv_pkt_cb
 };
 
 int hexdigit_to_num(unsigned char c)
@@ -157,22 +211,29 @@ void read_bytes_from_uart(uint8_t *pbuf, unsigned sz)
 #define STATE_IDLE    0
 #define STATE_STARTED 1
 #define STATE_READPKT 2
+#define PKT_TYPE_BT   1
+#define PKT_TYPE_WIFI 2
 
-unsigned read_pkt_from_uart(uint8_t *pktbuf)
+unsigned read_pkt_from_uart(uint8_t *pktbuf, int *p_pkttype)
 {
-    uint8_t *startframe = (uint8_t *) "\r\nSTARTFRAME,";
-    unsigned startframelen = strlen((char *) startframe);
     int state = STATE_IDLE;
     int pktlen = 0;
+    int pkttype = 0;
 
     while (1) {
         if (state == STATE_IDLE) {
             pktbuf[0] = read_byte_from_uart();
             printf("%c", pktbuf[0]);
             if (pktbuf[0] == '\r') {
-                read_bytes_from_uart(&pktbuf[1], startframelen-1);
-                if (memcmp(pktbuf, startframe, startframelen) == 0)
+                read_bytes_from_uart(&pktbuf[1], STARTFRAMELEN-1);
+                if (memcmp(pktbuf, STARTFRAMEBT, STARTFRAMELEN) == 0) {
                     state = STATE_STARTED;
+                    pkttype = PKT_TYPE_BT;
+                }
+                if (memcmp(pktbuf, STARTFRAMEWF, STARTFRAMELEN) == 0) {
+                    state = STATE_STARTED;
+                    pkttype = PKT_TYPE_WIFI;
+                }
             }
         }
 
@@ -193,6 +254,7 @@ unsigned read_pkt_from_uart(uint8_t *pktbuf)
             pktbuf[pktlen*2] = 0;
             printf("PKT: %s\n", pktbuf);
             unhexify(pktbuf);
+            *p_pkttype = pkttype;
             return pktlen;
         }
     }
@@ -213,21 +275,35 @@ void vhcibridge(void *pvParameters)
     int len;
 
     printf("Starting vhci bridge\n");
+
+    mutex = xSemaphoreCreateMutex();
     esp_vhci_host_register_callback(&vhci_host_cb);
 
     uart_init();
+
+    wifi_start();
     
     while (1) {
+        int pkttype = 0;
         wait_until_ready();
 
-        len = read_pkt_from_uart(g_pktbuf);
+        len = read_pkt_from_uart(g_pktbuf, &pkttype);
 
         if (len == 4 && memcmp("\xFF\x00\x01\x00", g_pktbuf, 4) == 0) {
             printf("skipping pkt FF 00 01 00\n");
             continue;
         }
 
-        host_send_pkt(g_pktbuf, len);
+        switch (pkttype) {
+        case PKT_TYPE_BT:
+            vhci_send_pkt(g_pktbuf, len);
+            break;
+        case PKT_TYPE_WIFI:
+            wifi_inject_packet(g_pktbuf, len);
+            break;
+        default:
+            printf("ERROR: unknown packet type!");
+        }
     }
 }
 

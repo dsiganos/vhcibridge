@@ -2,52 +2,42 @@
 
 import os, sys, binascii, time, hexdump, threading, serial
 
-#class State:
-#    def __init__(self):
-#        self.set(State.IDLE)
-#
-#    def set(self, st):
-#        self.i = 0
-#        self.state = st
-#
-#    def tick(self.ch):
-#        if self.state == State.IDLE
-#
-#    IDLE, STARTED, READPKT = range(3)
+STARTFRAMEBT = '\r\nSTARTFRAMEBT,'
+STARTFRAMEWF = '\r\nSTARTFRAMEWF,'
+STARTFRAMELEN = len(STARTFRAMEBT)
+assert(STARTFRAMELEN == len(STARTFRAMEWF))
 
-def read_pkt_from_host(fd):
-    data = os.read(fd, 2000)
-    print 'Read %d bytes from host' % len(data)
-    return data
-
-def write_pkt_to_host(fd, pkt):
-    data = os.write(fd, pkt)
-    print 'Wrote %d bytes to host' % len(pkt)
-    hexdump.hexdump(pkt)
-
-def write_pkt_to_controller(ser, pkt):
+def write_pkt_to_controller(ser, pkttuple):
+    pkttype, pkt = pkttuple
     hexpkt = binascii.hexlify(pkt)
-    frame = '\r\nSTARTFRAME,%04X,%s' % (len(pkt), hexpkt)
+    if pkttype == PktType.BT:
+        frame = '%s%04X,%s' % (STARTFRAMEBT, len(pkt), hexpkt)
+    else:
+        frame = '%s%04X,%s' % (STARTFRAMEWF, len(pkt), hexpkt)
     hexdump.hexdump(pkt)
     print 'TX: %s' % frame[2:]
     ser.write(frame)
+
+class PktType:
+    BT, WIFI = range(2)
 
 def read_pkt_from_controller(ser):
     class State:
         IDLE, STARTED, READPKT = range(3)
 
-    startframe = '\r\nSTARTFRAME,'
     state = State.IDLE
-    pktlen = 0
-
     while True:
         if state == State.IDLE:
             ch = ser.read(1)
             sys.stdout.write(ch)
             if ch == '\r':
-                data = '\r' + ser.read(len(startframe)-1)
-                if data == startframe:
+                data = '\r' + ser.read(STARTFRAMELEN-1)
+                if data == STARTFRAMEBT:
                     state = State.STARTED
+                    pkttype = PktType.BT
+                if data == STARTFRAMEWF:
+                    state = State.STARTED
+                    pkttype = PktType.WIFI
         
         if state == State.STARTED:
             data = ser.read(5)
@@ -63,33 +53,36 @@ def read_pkt_from_controller(ser):
             pkt = binascii.unhexlify(data)
             print 'Read pkt from controller'
             hexdump.hexdump(pkt)
-            return pkt
+            return (pkttype, pkt)
 
-class HostToControllerThread(threading.Thread):
-    def __init__(self, vhci, ser):
-        super(HostToControllerThread, self).__init__()
+class HostToEsp32Thread(threading.Thread):
+    def __init__(self, src, dst):
+        super(HostToEsp32Thread, self).__init__()
         self.running = True
-        self.vhci = vhci
-        self.ser = ser
+        self.src = src
+        self.dst = dst
 
     def run(self):
         while self.running:
-            pkt = read_pkt_from_host(self.vhci)
-            write_pkt_to_controller(self.ser, pkt)
+            write_pkt_to_controller(self.dst, self.src.read())
         print 'exited host to controller thread'
 
-class ControllerToHostThread(threading.Thread):
-    def __init__(self, vhci, ser):
-        super(ControllerToHostThread, self).__init__()
+class Esp32ToHostThread(threading.Thread):
+    def __init__(self, vhci, tap, ser):
+        super(Esp32ToHostThread, self).__init__()
         self.running = True
         self.vhci = vhci
+        self.tap = tap
         self.ser = ser
 
     def run(self):
         while self.running:
-            pkt = read_pkt_from_controller(self.ser)
+            (pkttype, pkt) = read_pkt_from_controller(self.ser)
             try:
-                write_pkt_to_host(self.vhci, pkt)
+                if pkttype == PktType.BT:
+                    self.vhci.write(pkt)
+                if pkttype == PktType.WIFI:
+                    self.tap.write(pkt)
             except Exception, e:
                 print e
         print 'exited controller to host thread'
@@ -98,21 +91,53 @@ print 'ensure kernel module is loaded'
 os.system('sudo modprobe hci_vhci; sleep 1; sudo chmod a+rw /dev/vhci')
 
 # create the virtual HCI controller
-vhci_fd = os.open("/dev/vhci", os.O_RDWR)
+class VhciNode(object):
+    def __init__(self):
+        self.vhci_fd = os.open("/dev/vhci", os.O_RDWR)
+    def write(self, pkt):
+        os.write(self.vhci_fd, pkt)
+        print 'Wrote %d VHCI bytes to host' % len(pkt)
+        hexdump.hexdump(pkt)
+    def read(self):
+        data = os.read(self.vhci_fd, 2000)
+        print 'Read %d bytes from VHCI host' % len(data)
+        return (PktType.BT, data)
+vhci_node = VhciNode()
+
+# create the tap device
+from pytun import TunTapDevice, IFF_TAP
+class TapNode(object):
+    def __init__(self):
+        os.system('sudo ip tuntap add dev esp32 mode tap user ds')
+        self.tap = TunTapDevice(name='esp32', flags=IFF_TAP)
+    def write(self, pkt):
+        self.tap.write('\x00\x00\x00\x00' + pkt)
+        print 'Wrote %d WIFI bytes to host' % len(pkt)
+        hexdump.hexdump(pkt)
+    def read(self):
+        data = self.tap.read(2000)[4:]
+        print 'Read %d bytes from TAP interface' % len(data)
+        return (PktType.WIFI, data)
+tap_node = TapNode()
 
 # open the serial port that connects to the controller
 # serdev = '/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0'
 serdev = '/dev/serial/by-id/usb-FTDI_TTL232R-3V3_FT912Q4M-if00-port0'
 ctrl_fd = serial.serial_for_url('spy://%s?file=serial.log' % serdev, timeout=1, baudrate=115200, rtscts=False)
+ctrl_fd.flushInput()
 
-hostToControllerThread = HostToControllerThread(vhci_fd, ctrl_fd)
-hostToControllerThread.start()
+btHostToControllerThread = HostToEsp32Thread(vhci_node, ctrl_fd)
+btHostToControllerThread.start()
 
-controllerToHostThread = ControllerToHostThread(vhci_fd, ctrl_fd)
-controllerToHostThread.start()
+wfHostToEsp32Thread = HostToEsp32Thread(tap_node, ctrl_fd)
+wfHostToEsp32Thread.start()
 
-hostToControllerThread.join()
-controllerToHostThread.join()
+esp32ToHostThread = Esp32ToHostThread(vhci_node, tap_node, ctrl_fd)
+esp32ToHostThread.start()
+
+btHostToControllerThread.join()
+wfHostToEsp32Thread.join()
+esp32ToHostThread.join()
 
 # os.system('hciconfig hci1 reset &')
 

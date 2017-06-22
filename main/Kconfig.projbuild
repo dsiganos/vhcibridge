@@ -1,0 +1,15 @@
+menu "Wifi Configuration"
+
+config WIFI_SSID
+    string "WiFi SSID"
+    default "dimitris-public"
+    help
+	SSID (network name) for the example to connect to.
+
+config WIFI_PASSWORD
+    string "WiFi Password"
+    default "xxxx"
+    help
+	WiFi password (WPA or WPA2) for the example to use.
+
+endmenu

@@ -1,3 +1,6 @@
 /build
-*.pyc
 /serial.log
+/tags
+/sdkconfig.old
+*.pyc
+*.swp

@@ -28,16 +28,22 @@ port = 1
 #ser.close()
 
 
-
-
+number_of_bytes = 10000
 sock=bluetooth.BluetoothSocket( bluetooth.RFCOMM )
 sock.connect((bd_addr, port))
 
+sock.send('0x%08X' %number_of_bytes)
+
+
 n = 0
-while n < 10:
-    sock.send("dimitris")
-    print sock.recv(1000)
+
+total_len = 0
+while n < 1000:
+    data =  sock.recv(1000)
+    total_len = total_len + len(data)
+    print data, total_len
+    if total_len == number_of_bytes:
+        break
     time.sleep(1)
     n += 1
-time.sleep(5)
 sock.close()

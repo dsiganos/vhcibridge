@@ -16,18 +16,16 @@ function Write_data_on_spp(SPP_data$)
 
     dim SPP_data_Len, wLen
 
-//    if buffer_full == 1 then
-        SPP_data_Len = strlen(SPP_data$)
-        rc = BtcSppWrite(hC, SPP_data$, wLen)
-        if wLen != SPP_data_Len then
-            buffer_full = 1
-            strshiftleft(SPP_data$,wLen)
-        else
-            buffer_full = 0
-            number_of_bytes = number_of_bytes - 1
-        endif
-//    endif
+    SPP_data_Len = strlen(SPP_data$)
+    rc = BtcSppWrite(hC, SPP_data$, wLen)
+    if wLen != SPP_data_Len then
+        buffer_full = 1
+        strshiftleft(SPP_data$,wLen) // Discard the data already written
+    else
+        buffer_full = 0
+        number_of_bytes = number_of_bytes - 1
         timerstart(1,TEN_SECOND,0)
+    endif
 endfunc 1
 
 function is_valid_request(data$)

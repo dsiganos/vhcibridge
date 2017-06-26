@@ -96,9 +96,11 @@ endfunc 1
 //This handler is  Called when an SPP disconnection occurs
 //------------------------------------------------------------------------------
 function HandlerSppDiscon(hConn)
-    print "\n --- Spp Disconnect"
+    print "\n --- Spp Disconnect\n"
     //Set connectable
     rc = BtcSetConnectable(1)
+    rc = BtcSppOpen(hSppPort)
+    print "Ready\n"
 endfunc 1
 
 //------------------------------------------------------------------------------

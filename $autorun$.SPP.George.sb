@@ -1,3 +1,4 @@
+#define TEN_SECOND 10000 // There are 10000 ms in 10 secs
 
 dim buffer_full
 dim SPP_data$
@@ -6,6 +7,8 @@ dim s$[8]
 dim number_of_bytes
 SPP_data$ = "a"
 buffer_full = 0
+dim hSppPort
+dim hConn
 
 function Write_data_on_spp(SPP_data$)
     dim SPP_data_Len, wLen
@@ -21,6 +24,7 @@ function Write_data_on_spp(SPP_data$)
             number_of_bytes = number_of_bytes - 1
         endif
 //    endif
+        timerstart(1,TEN_SECOND,0)
 endfunc 1
 
 function is_valid_request(data$)
@@ -36,7 +40,6 @@ function send_response()
 endfunc 1
 
 sub Initialise()
-    dim hSppPort
 
 
     //Configure discoverability mode
@@ -85,6 +88,7 @@ function HandlerSppConn(hConn, res) as integer
 
     //If connected successfully
     if res == 0 then
+        timerstart(1,TEN_SECOND,0)
         hC = hConn
         //Set not connectable to prevent multiple connections
         rc = BtcSetConnectable(0)
@@ -118,11 +122,21 @@ function HandlerSppTxEmpty(i)
     rc = send_response()
 endfunc 1
 
+function timer1()
+    rc = BtcSppClose(hSppPort)
+    if rc == 0 then
+        print "\n\nDisconnecting..."
+    else
+        print "\nError:", integer.h'rc
+    endif
+    rc = HandlerSppDiscon(hConn)
+endfunc 1
 OnEvent  EVBTC_PAIR_REQUEST     call HandlerPairReq
 OnEvent  EVSPPCONN              call HandlerSppConn
 OnEvent  EVSPPDISCON            call HandlerSppDiscon
 OnEvent  EVBTC_SPP_DATA_RECEIVED call HandlerSppData
 OnEvent  EVSPPTXEMPTY           call HandlerSppTxEmpty
+OnEvent  EVTMR1                 call timer1
 
 Initialise()
 WaitEvent

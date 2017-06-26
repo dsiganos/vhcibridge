@@ -107,11 +107,11 @@ endfunc 1
 //This handler is  Called after an SPP connection attempt
 //------------------------------------------------------------------------------
 function HandlerSppConn(hConn, res) as integer
-    print "\n --- SPP Connect: (";integer.h' res;")\n"
 
     //If connected successfully
     if res == 0 then
         timerstart(1,TEN_SECOND,0)
+        print "\n --- SPP Connect: ("; hConn;")\n"
         hC = hConn
         //Set not connectable to prevent multiple connections
         rc = BtcSetConnectable(0)

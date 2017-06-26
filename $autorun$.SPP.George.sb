@@ -11,6 +11,9 @@ dim hSppPort
 dim hConn
 
 function Write_data_on_spp(SPP_data$)
+// Tries to write data to an spp pipe. In case of success, it decrements the number_of_bytes
+// left to be written to the pipe.
+
     dim SPP_data_Len, wLen
 
 //    if buffer_full == 1 then
@@ -31,6 +34,11 @@ function is_valid_request(data$)
 endfunc 1
 
 function send_response()
+// This is the function that writes the data to the pipe.
+// In case the last write was not successfull (the buffer is full) then
+// we break out to the main waitevent so we can proccess other tasks
+// (Non blocking write)
+
     while number_of_bytes > 0
         rc = Write_data_on_spp(SPP_data$)
         if buffer_full == 1 then
@@ -59,6 +67,8 @@ endsub
 //This handler is Called when data is received via SPP - BRIDGE mode
 //------------------------------------------------------------------------------
 function HandlerSppData()
+// If we get a valid request for download, we respond to it...
+
     dim hPort,data$,rLen
     rc = BtcSppRead(hPort, data$, rLen)
 
@@ -118,6 +128,9 @@ endfunc 1
 // Called when txbuffer is empty
 //------------------------------------------------------------------------------
 function HandlerSppTxEmpty(i)
+// When the buffer is empty, set the global variable and then continue sending
+// the data through the pipe.
+
     buffer_full = 0
     rc = send_response()
 endfunc 1

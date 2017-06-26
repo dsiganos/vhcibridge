@@ -31,6 +31,17 @@ function Write_data_on_spp(SPP_data$)
 endfunc 1
 
 function is_valid_request(data$)
+// Some basic checks to verify that the receiver obays the protocol
+// We check that the total length of th number received is 10 bytes
+// and that it starts with a "0x"
+
+    dim hex$: hex$ = "0x"
+    if strlen(data$) != 10 then
+        exitfunc 0
+    endif
+    if strpos(data$,hex$,0) != 0 then
+        exitfunc 0
+    endif
 endfunc 1
 
 function send_response()

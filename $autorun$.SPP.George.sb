@@ -81,12 +81,11 @@ function HandlerSppData()
     dim hPort,data$,rLen
     rc = BtcSppRead(hPort, data$, rLen)
 
-//    if is_valid_request(data$) then
-        //    timerstart(1,1,0)
+    if is_valid_request(data$) then
         rc = ExtractIntToken(data$,number_of_bytes)
-        print "extracted length is "; number_of_bytes; "\n"
+        print "requested size is "; number_of_bytes; " bytes\n"
         rc= send_response()
-//    endif
+    endif
 endfunc 1
 
 
@@ -155,6 +154,8 @@ function timer1()
     endif
     rc = HandlerSppDiscon(hConn)
 endfunc 1
+
+
 OnEvent  EVBTC_PAIR_REQUEST     call HandlerPairReq
 OnEvent  EVSPPCONN              call HandlerSppConn
 OnEvent  EVSPPDISCON            call HandlerSppDiscon

@@ -10,3 +10,6 @@ include $(IDF_PATH)/make/project.mk
 ctags:
 	ctags -R ../esp-idf
 	ctags -a -R
+
+uwterminal:
+	../uwterminal/UwTerminalX ACCEPT COM=/dev/serial/bt900

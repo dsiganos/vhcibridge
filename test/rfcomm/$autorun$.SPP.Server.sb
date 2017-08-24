@@ -5,10 +5,20 @@ dim SPP_data$
 dim rc,hC
 dim s$[8]
 dim number_of_bytes
-SPP_data$ = "a"
+SPP_data$ = "start1234567890123456789012345678901234567890end"
 buffer_full = 0
 dim hSppPort
 dim hConn
+
+sub delay(t as integer)
+    t = t*10
+    DIM tm
+    tm = gettickcount()
+    while (gettickcount()-tm) < t
+        //Wait for t*1000 milliseconds
+    endwhile
+endsub
+
 
 function Write_data_on_spp(SPP_data$)
 // Tries to write data to an spp pipe. In case of success, it decrements the number_of_bytes
@@ -16,6 +26,7 @@ function Write_data_on_spp(SPP_data$)
 
     dim SPP_data_Len, wLen
 
+    //delay(1)
     SPP_data_Len = strlen(SPP_data$)
     rc = BtcSppWrite(hC, SPP_data$, wLen)
     if wLen != SPP_data_Len then
@@ -23,7 +34,7 @@ function Write_data_on_spp(SPP_data$)
         strshiftleft(SPP_data$,wLen) // Discard the data already written
     else
         buffer_full = 0
-        number_of_bytes = number_of_bytes - 1
+        number_of_bytes = number_of_bytes - wLen
         timerstart(1,TEN_SECOND,0)
     endif
 endfunc 1
@@ -56,11 +67,25 @@ function send_response()
     endwhile
 endfunc 1
 
+sub print_bonding_stats()
+    dim rc, nRoll, nPers
+    print "Bonding Manager Database Statistics:\n"
+    print "Capacity: ";   BtcBondingStats(nRoll, nPers); "\n"
+    print "Rolling: ";    nRoll; "\n"
+    print "Persistent: "; nPers; "\n"
+endsub
+
 sub Initialise()
 
+    print_bonding_stats()
 
     //Configure discoverability mode
-    rc = BtcDiscoveryConfig(0,0)
+    rc = BtcDiscoveryConfig(0, 0) // general mode
+    rc=BtcDiscoveryConfig(1, 0x1000) // inquiry scan interval
+    rc=BtcDiscoveryConfig(2, 0x1000) // inquiry scan window
+    rc=BtcSetFriendlyName("bt900_rfcomm_server")
+    rc=BtcSetDiscoverable(1, 24*60*60)
+    rc=BtcSecMngrIocap(3) // display only
 
     rc = BtcSetPairable(1)
 
@@ -123,6 +148,7 @@ endfunc 1
 // Called when there is a pairing request from another device
 //------------------------------------------------------------------------------
 function HandlerPairReq()
+    print "pair request\n"
     rc = BtcGetPAIRRequestBDAddr(s$[3])       //Setting it to s$[3] so it doesn't get mixed up with any other strings (command params etc) that may be stored in s$[1]
     rc = BtcBondingEraseKey(s$[3])            //Erase link key for this bluetooth device incase already bonded with it
     print "\nPair Req: "; StrHexize$(s$[3])

@@ -7,6 +7,12 @@ VHCI bridge between linux and Espressif ESP32
 make clean
 make -j
 ```
+## Example setenv file:
+```
+PATH=$HOME/esp32/toolchain/default/bin:$PATH
+export IDF_PATH=$HOME/esp32/esp-idf
+export ESPPORT=/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0
+```
 
 ## To flash the board
 ```
